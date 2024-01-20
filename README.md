@@ -1,3 +1,7 @@
+# Hackathon Submission
+- Partially working ingestion code to fetch all data from Open Data NYC INto current directory
+- Future work includes ingestion adn ETL mechanism for data mapping
+
 # nycdb
 
 Let's research the landlord! New York City is in a housing crisis. Some [landlords](https://youtu.be/o1SzKHXz8tU) leave their buildings in despair and let their tenants suffer without heat in winter. Others evict their tenants, legally or illegally, in order to flip buildings and profit off of gentrification. Affordable housing is a scarce resource.
