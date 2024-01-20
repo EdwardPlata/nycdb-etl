@@ -1,0 +1,151 @@
+import asyncio
+import logging
+import aiohttp
+import os
+import json
+import random
+from bs4 import BeautifulSoup
+from nyc_data_pipeline.source_extract_async import *
+
+# [Include the class definitions of NYCPublicDataFetcher, NYCEndpointFetcher, and NYCUrlFetcher here]
+
+# Initialize logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
+class NYCPipeline:
+    def __init__(self, urls, bucket_name):
+        self.urls = urls
+        self.bucket_name = bucket_name
+        self.endpoints = {}
+
+    async def fetch_endpoints_from_url(self, url):
+        # Fetch data from the URL
+        data_fetcher = NYCPublicDataFetcher(url)
+        data_dict = await data_fetcher.run()
+
+        # Extract relevant data and create a dictionary
+        data_dict = {url.split('/')[-2]: url.lower() for _, url in data_dict.items()}
+
+        # Fetch endpoints from the data dictionary
+        endpoint_fetcher = NYCEndpointFetcher()
+        endpoints = await endpoint_fetcher.run(data_dict)
+        return endpoints
+
+    async def fetch_all_endpoints(self):
+        # Fetch endpoints from all URLs asynchronously
+        tasks = [self.fetch_endpoints_from_url(url) for url in self.urls]
+        results = await asyncio.gather(*tasks)
+
+        # Update the endpoints dictionary
+        for endpoints in results:
+            self.endpoints.update(endpoints)
+
+    async def save_data_to_file(self, data, filename):
+        # Save data to a file
+        with open(filename, 'w') as file:
+            file.write(data)
+
+    async def run(self):
+        logging.info("Starting the NYCPipeline process")
+
+        # Fetch all endpoints from the provided URLs
+        logging.info("Fetching all endpoints from URLs")
+        await self.fetch_all_endpoints()
+
+        # Dictionary to store data
+        data_dict = {}
+
+        # Save the fetched data in the dictionary
+        for key, endpoint in self.endpoints.items():
+            identifier = f"{key}"  # or any other naming scheme you prefer
+            logging.info(f"Saving data for {key}")
+            data_dict[identifier] = endpoint
+
+        logging.info("NYCPipeline process completed")
+
+        # Return the dictionary with data
+        return data_dict
+
+
+# Set up logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
+async def fetch_json(url):
+    logging.info(f"Fetching JSON data from {url}")
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url) as response:
+            if response.status == 200:
+                json_data = await response.json()
+                logging.info(f"JSON data fetched successfully from {url}")
+                return json_data
+            else:
+                logging.error(f"Failed to fetch JSON data from {url}")
+                return None
+
+async def fetch_all_json(data_dict):
+    logging.info("Fetching JSON data from all URLs")
+    json_data_dict = {}
+    tasks = []
+
+    # Fetch JSON data from each URL asynchronously
+    for key, url in data_dict.items():
+        task = asyncio.create_task(fetch_json(url))
+        tasks.append((key, task))
+
+    # Wait for all tasks to complete
+    for key, task in tasks:
+        json_data = await task
+        if json_data:
+            json_data_dict[key] = json_data
+
+    logging.info("JSON data fetched successfully from all URLs")
+    return json_data_dict
+
+async def save_json_data(data_dict):
+    logging.info("Saving JSON data to files")
+    directory = "data"
+    if not os.path.exists(directory):
+        os.makedirs(directory)
+
+    tasks = []
+
+    # Save JSON data to files asynchronously
+    for key, json_data in data_dict.items():
+        filename = os.path.join(directory, f"{key}.json")
+        task = asyncio.to_thread(write_json_file, filename, json_data)
+        tasks.append(task)
+
+    await asyncio.gather(*tasks)
+
+    logging.info("JSON data saved successfully!")
+
+def write_json_file(filename, json_data):
+    with open(filename, 'w') as file:
+        json.dump(json_data, file)
+
+import concurrent.futures
+
+async def save_json_data(data_dict):
+    logging.info("Saving JSON data to files")
+    directory = "data"
+    if not os.path.exists(directory):
+        os.makedirs(directory)
+
+    tasks = []
+    loop = asyncio.get_event_loop()
+
+    # Save JSON data to files using concurrent execution
+    for key, json_data in data_dict.items():
+        filename = os.path.join(directory, f"{key}.json")
+        task = loop.run_in_executor(None, write_json_file, filename, json_data)
+        tasks.append(task)
+
+import nest_asyncio
+
+# Apply the nest_asyncio patch
+nest_asyncio.apply()
+
+# Now you can run your code
+loop = asyncio.get_event_loop()
+json_data_dict = loop.run_until_complete(fetch_all_json(data_dict))
+loop.run_until_complete(save_json_data(json_data_dict))
